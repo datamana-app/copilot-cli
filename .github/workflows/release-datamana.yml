@@ -1,0 +1,40 @@
+name: release-datamana
+
+on:
+  push:
+    tags: ["v*-datamana.*"]
+  workflow_dispatch:        # Actions 晚開時可手動補跑;分支 HEAD 必須正好在某個 v*-datamana.* tag 上
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # Makefile 用 git describe --tags 產版本字串
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "16"
+      - name: Unit tests for the patched packages
+        run: go test ./internal/pkg/term/progress/ ./internal/pkg/stream/
+      - name: Build linux binaries
+        run: make package-custom-resources compile-linux package-custom-resources-clean
+      - name: Verify
+        run: |
+          ./bin/local/copilot-linux-amd64 --version
+          cd bin/local && sha256sum copilot-linux-amd64 copilot-linux-arm64 > SHA256SUMS && cat SHA256SUMS
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(git describe --tags --exact-match)
+          gh release create "$TAG" \
+            bin/local/copilot-linux-amd64 bin/local/copilot-linux-arm64 bin/local/SHA256SUMS \
+            --title "$TAG" \
+            --notes "aws/copilot-cli v1.34.1 + fix: skip CloudFormation 'Eventual consistency check initiated' events (SiM07 7d42a68f). Built by release-datamana workflow."
